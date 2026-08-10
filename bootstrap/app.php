@@ -22,6 +22,12 @@ return Application::configure(basePath: dirname(__DIR__))
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
         ]);
+
+        $middleware->preventRequestForgery(except: [
+            'api/bridge/stk/callback',
+            'api/bridge/b2c/callback',
+            'api/bridge/b2c/timeout',
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
