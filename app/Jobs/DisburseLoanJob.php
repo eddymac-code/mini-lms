@@ -3,10 +3,13 @@
 namespace App\Jobs;
 
 use App\Models\Loan;
+use App\Models\LoanTransaction;
 use App\Services\MpesaService;
 use App\Support\PhoneNumber;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class DisburseLoanJob implements ShouldQueue
@@ -45,6 +48,24 @@ class DisburseLoanJob implements ShouldQueue
             return;
         }
 
+        /*
+         * DEVELOPMENT MODE
+         *
+         * Simulate a successful B2C response without contacting
+         * Safaricom Daraja.
+         */
+        if (config('mpesa.disburse_environment') === 'development') {
+            $this->simulateDisbursement($loan, $transaction);
+
+            Log::info('After simulation in job', [
+                'loan_id' => $loan->id,
+                'status' => $loan->fresh()->status,
+            ]);
+
+            return;
+        }
+
+
         $phone = PhoneNumber::normalize(
             $loan->customer->phone
         );
@@ -67,6 +88,42 @@ class DisburseLoanJob implements ShouldQueue
                     $response['ConversationID'] ?? null,
                 'response' => $response,
             ],
+        ]);
+    }
+
+    private function simulateDisbursement(
+        Loan $loan,
+        LoanTransaction $transaction
+    ): void {
+        DB::transaction(function () use ($loan, $transaction) {
+            $simulatedReceipt =
+                'SIM-B2C-' . $loan->id . '-' . now()->format('YmdHis');
+
+            $transaction->update([
+                'metadata' => [
+                    ...($transaction->metadata ?? []),
+                    'status' => 'completed',
+                    'source' => 'simulated_b2c',
+                    'simulated' => true,
+                    'originator_conversation_id' =>
+                        $this->originatorConversationId,
+                    'conversation_id' =>
+                        'SIM-CONV-' . $loan->id,
+                    'transaction_receipt' =>
+                        $simulatedReceipt,
+                    'result_code' => 0,
+                    'result_description' =>
+                        'Simulated B2C disbursement successful.',
+                ],
+            ]);
+
+            $loan->status = 'disbursed';
+            $loan->save();
+        });
+
+        Log::info('Simulated disbursement completed', [
+            'loan_id' => $loan->id,
+            'status' => $loan->fresh()->status,
         ]);
     }
 
@@ -101,10 +158,9 @@ class DisburseLoanJob implements ShouldQueue
          */
         $loan->installments()->delete();
 
-        $loan->update([
-            'status' => 'approved',
-            'disbursed_at' => null,
-            'disbursed_by' => null,
-        ]);
+        $loan->status = 'approved';
+        $loan->disbursed_at = null;
+        $loan->disbursed_by = null;
+        $loan->save();
     }
 }

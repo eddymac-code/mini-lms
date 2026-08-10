@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Loan;
+use App\Models\LoanInstallment;
 use App\Models\PaymentRequest;
 use App\Services\MpesaService;
 use App\Support\PhoneNumber;
@@ -45,24 +46,69 @@ class PaymentController extends Controller
         Loan $loan,
         MpesaService $mpesa
     ): RedirectResponse {
-        if (! in_array($loan->status, ['disbursed', 'active'])) {
+        if (! in_array($loan->status, ['disbursed', 'active'], true)) {
             return back()->withErrors([
                 'payment' => 'This loan is not available for repayment.',
             ]);
         }
 
-        $request->validate([
-            'amount' => ['required', 'numeric', 'min:1'],
+        $validated = $request->validate([
+            'loan_installment_id' => [
+                'required',
+                'integer',
+                'exists:loan_installments,id',
+            ],
         ]);
 
-        $amount = (float) $request->amount;
+        $installment = LoanInstallment::where('id', $validated['loan_installment_id'])
+            ->where('loan_id', $loan->id)
+            ->first();
 
-        $reference = 'PAY-' . $loan->id . '-' . now()->format('YmdHis');
+        if (! $installment) {
+            return back()->withErrors([
+                'payment' => 'The selected installment does not belong to this loan.',
+            ]);
+        }
+
+        $outstanding = round(
+            (float) $installment->amount_due
+                - (float) $installment->amount_paid,
+            2
+        );
+
+        if ($outstanding <= 0) {
+            return back()->withErrors([
+                'payment' => 'This installment has already been fully paid.',
+            ]);
+        }
+
+        /*
+         * Don't create another active request for the same installment.
+         */
+        $existingRequest = PaymentRequest::where(
+            'loan_installment_id',
+            $installment->id
+        )
+            ->where('status', 'pending')
+            ->where(function ($query) {
+                $query->whereNull('expires_at')
+                    ->orWhere('expires_at', '>', now());
+            })
+            ->first();
+
+        if ($existingRequest) {
+            return back()->withErrors([
+                'payment' => 'A payment request is already pending for this installment.',
+            ]);
+        }
+
+        $reference = 'PAY-INST-' . $installment->id . '-' . now()->format('YmdHis');
 
         $paymentRequest = PaymentRequest::create([
             'loan_id' => $loan->id,
             'customer_id' => $loan->customer_id,
-            'amount' => $amount,
+            'loan_installment_id' => $installment->id,
+            'amount' => $outstanding,
             'phone' => PhoneNumber::normalize(
                 $loan->customer->phone
             ),
@@ -74,9 +120,9 @@ class PaymentController extends Controller
         try {
             $response = $mpesa->stkPush(
                 phone: $paymentRequest->phone,
-                amount: $amount,
+                amount: $outstanding,
                 reference: $reference,
-                description: 'Loan repayment'
+                description: 'Loan #' . $loan->id . ' repayment'
             );
 
             $paymentRequest->update([
@@ -89,7 +135,7 @@ class PaymentController extends Controller
 
             return back()->with(
                 'success',
-                'M-Pesa payment request sent successfully.'
+                'Payment request sent to the customer.'
             );
         } catch (\Throwable $e) {
             $paymentRequest->update([

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { Head, Link, useForm } from '@inertiajs/vue3';
+import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { ArrowLeft, CheckCircle, Send } from '@lucide/vue';
 import { loans } from '@/routes';
+import { ref } from 'vue';
 
 defineOptions({
     layout: {
@@ -42,6 +43,7 @@ interface Installment {
     due_date: string;
     principal_due: string | number;
     interest_due: string | number;
+    fee_due: string | number;
     amount_due: string | number;
     amount_paid: string | number;
     status: string;
@@ -135,6 +137,33 @@ function formatRepaymentOrder(order: string) {
     return order === 'principal_first'
         ? 'Principal First'
         : 'Interest First';
+}
+
+const processingInstallment = ref<number | null>(null);
+
+function requestPayment(installmentId: number, amount: number) {
+    if (
+        !confirm(
+            `Send an M-Pesa payment request for KES ${amount.toLocaleString()}?`
+        )
+    ) {
+        return;
+    }
+
+    processingInstallment.value = installmentId;
+
+    router.post(
+        `/loans/${props.loan.id}/payments`,
+        {
+            loan_installment_id: installmentId,
+        },
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                processingInstallment.value = null;
+            },
+        }
+    );
 }
 </script>
 
@@ -439,6 +468,10 @@ function formatRepaymentOrder(order: string) {
                             </th>
 
                             <th class="px-4 py-3 text-right">
+                                Fees
+                            </th>
+
+                            <th class="px-4 py-3 text-right">
                                 Amount Due
                             </th>
 
@@ -448,6 +481,10 @@ function formatRepaymentOrder(order: string) {
 
                             <th class="px-4 py-3 text-left">
                                 Status
+                            </th>
+
+                            <th class="px-4 py-3 text-right">
+                                Actions
                             </th>
                         </tr>
                     </thead>
@@ -474,6 +511,10 @@ function formatRepaymentOrder(order: string) {
                                 {{ formatMoney(installment.interest_due) }}
                             </td>
 
+                            <td class="px-4 py-3 text-right">
+                                {{ formatMoney(installment.fee_due) }}
+                            </td>
+
                             <td class="px-4 py-3 text-right font-medium">
                                 {{ formatMoney(installment.amount_due) }}
                             </td>
@@ -484,6 +525,29 @@ function formatRepaymentOrder(order: string) {
 
                             <td class="px-4 py-3 capitalize">
                                 {{ installment.status }}
+                            </td>
+
+                            <td class="px-4 py-3 text-right">
+                                <button
+                                    v-if="
+                                        installment.status !== 'paid' &&
+                                        Number(installment.amount_paid) <
+                                            Number(installment.amount_due)
+                                    "
+                                    type="button"
+                                    class="inline-flex items-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                                    :disabled="processingInstallment === installment.id"
+                                    @click="requestPayment(
+                                            installment.id,
+                                            Number(installment.amount_due) - Number(installment.amount_paid)
+                                        )"
+                                >
+                                    {{
+                                        processingInstallment === installment.id
+                                            ? 'Sending...'
+                                            : 'Request Payment'
+                                    }}
+                                </button>
                             </td>
                         </tr>
                     </tbody>

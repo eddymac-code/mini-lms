@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\DarajaCallback;
+use App\Models\LoanInstallment;
 use App\Models\LoanTransaction;
 use App\Models\Payment;
 use App\Models\PaymentAllocation;
@@ -129,18 +130,26 @@ class MpesaCallbackController extends Controller
                 ),
             ]);
 
-            $installmentId = (int) str(
-                $paymentRequest->reference
-            )->between('INST-', '-');
-
-            $installment = \App\Models\LoanInstallment::lockForUpdate()
-                ->findOrFail($installmentId);
+            $installment = LoanInstallment::lockForUpdate()
+                ->findOrFail($paymentRequest->loan_installment_id);
 
             $outstanding = round(
                 (float) $installment->amount_due
                 - (float) $installment->amount_paid,
                 2
             );
+
+            if ($outstanding <= 0) {
+                $paymentRequest->update([
+                    'status' => 'completed',
+                ]);
+
+                $darajaCallback->update([
+                    'processed_at' => now(),
+                ]);
+
+                return;
+            }
 
             $allocation = min($amount, $outstanding);
 
@@ -175,8 +184,9 @@ class MpesaCallbackController extends Controller
                 'payment_id' => $payment->id,
                 'metadata' => [
                     'source' => 'mpesa_stk',
-                    'checkout_request_id' =>
-                        $paymentRequest->checkout_request_id,
+                    'checkout_request_id' => $paymentRequest->checkout_request_id,
+                    'loan_installment_id' =>  $installment->id,
+                    'allocated_amount' => $allocation,
                 ],
             ]);
 

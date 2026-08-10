@@ -86,7 +86,7 @@ class LoanService
     /**
      * Disburse an approved loan and generate its schedule.
      *
-     * Daraja B2C initiation launched here boundary.
+     * Daraja B2C initiation launched here.
      */
     public function disburse(
         Loan $loan,

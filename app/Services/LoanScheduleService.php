@@ -238,8 +238,8 @@ class LoanScheduleService
             );
 
             $feeDue = $loan->loanProduct->fee_is_recurring
-            ? $loan->loanProduct->fees
-            : ($i === 1 ? $loan->loanProduct->fees : 0);
+                ? (float) $loan->loanProduct->fees
+                : ($i === 1 ? (float) $loan->loanProduct->fees : 0);
 
             /*
             * Make the final installment absorb rounding differences
@@ -248,15 +248,29 @@ class LoanScheduleService
             if ($i === $periods) {
                 $principalDue = round($remainingPrincipal, 2);
 
+                /*
+                * The final installment consists of:
+                *
+                * remaining principal
+                * + final period interest
+                * + applicable fee
+                */
                 $amountDue = round(
                     $principalDue + $interestDue + $feeDue,
                     2
                 );
             } else {
-                $amountDue = $regularPayment;
-
+                /*
+                * regularPayment contains only principal + interest.
+                * Fees are added separately.
+                */
                 $principalDue = round(
-                    $amountDue - $interestDue + $feeDue,
+                    $regularPayment - $interestDue,
+                    2
+                );
+
+                $amountDue = round(
+                    $regularPayment + $feeDue,
                     2
                 );
             }

@@ -14,6 +14,7 @@ class PaymentRequest extends Model
     protected $fillable = [
         'loan_id',
         'customer_id',
+        'loan_installment_id',
         'amount',
         'phone',
         'reference',
@@ -44,5 +45,10 @@ class PaymentRequest extends Model
     public function payment(): HasOne
     {
         return $this->hasOne(Payment::class);
+    }
+
+    public function loanInstallment(): BelongsTo
+    {
+        return $this->belongsTo(LoanInstallment::class);
     }
 }
